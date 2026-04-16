@@ -129,6 +129,9 @@ async def handle_function_call(payload: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "get_standup_report":
         answer = await _handle_get_standup_report(parameters)
 
+    elif name == "get_latest_commits":
+        answer = await _handle_get_latest_commits(parameters)
+
     else:
         logger.warning(f"Unknown function call: '{name}'")
         answer = "I'm sorry, I don't know how to perform that action yet."
@@ -238,6 +241,32 @@ async def _handle_get_recent_diff(params: Dict) -> str:
     return summary
 
 
+async def _handle_get_latest_commits(params: Dict) -> str:
+    repo = params.get("repo") or state.active_repo
+    count = int(params.get("count", 5))
+    if not repo:
+        return "I need a repository to get recent commits."
+    logger.info(f"[Tool] get_latest_commits: repo={repo}, count={count}")
+    result = _fetcher.get_latest_commits(repo, count=count)
+    if "error" in result:
+        return result["error"]
+    commits = result.get("commits", [])
+    if not commits:
+        return f"No commits found in {repo}."
+    latest = commits[0]
+    summary = (
+        f"The most recent commit in {repo} was {latest['sha']} by {latest['author']} "
+        f"on {latest['date'][:10]}: {latest['message']}."
+    )
+    if len(commits) > 1:
+        rest = "; ".join(
+            f"{c['sha']} by {c['author']} on {c['date'][:10]}: {c['message']}"
+            for c in commits[1:]
+        )
+        summary += f" Before that: {rest}."
+    return summary
+
+
 async def _handle_get_standup_report(params: Dict) -> str:
     repo = params.get("repo") or state.active_repo
     hours = int(params.get("hours", 24))
@@ -329,8 +358,16 @@ async def build_vapi_inline_config() -> Dict[str, Any]:
             f"ALWAYS use '{state.active_repo}' as the repo argument in every tool call unless the user explicitly names a different one. "
             "Your responses are spoken aloud — NEVER use markdown, bullet points, or code blocks. "
             "Keep responses under 150 words. Sound like a friendly senior developer on a video call. "
-            "When the tool returns an answer, relay it exactly — do not re-summarise or add filler phrases. "
-            "Available tools: search_codebase, search_all_repos, read_file, list_directory, get_recent_diff, get_standup_report."
+            "When the tool returns an answer, relay it conversationally — do not add filler phrases like 'just a sec' or 'hold on'. "
+            "ALWAYS call a tool before answering — never say you cannot fetch information without first trying a tool call. "
+            "\n\nTool routing guide:"
+            "\n- 'what is this project about?' or 'describe the repo' → call read_file with path='README.md'"
+            "\n- 'when was the last commit?' or 'show recent commits' → call get_latest_commits"
+            "\n- 'what happened recently?' or standup questions → call get_standup_report"
+            "\n- questions about code, features, architecture → call search_codebase"
+            "\n- 'read file X' or 'show me X' → call read_file"
+            "\n- 'list files in X' → call list_directory"
+            "\n- 'what changed in commit ABC?' → call get_recent_diff with the sha"
         )
     else:
         indexed = list_indexed_repos()
@@ -343,6 +380,7 @@ async def build_vapi_inline_config() -> Dict[str, Any]:
             "You are SonarCode, a voice codebase assistant. "
             f"Indexed repos: {repo_list}. "
             "Ask the user which repo to explore, then use the appropriate tool. "
+            "ALWAYS call a tool before answering — never say you cannot fetch information without first trying a tool call. "
             "Responses are spoken aloud — no markdown."
         )
 
@@ -413,6 +451,15 @@ async def build_vapi_inline_config() -> Dict[str, Any]:
             {
                 "repo":  {"type": "string", "description": "Repository slug in owner/repo format"},
                 "hours": {"type": "number", "description": "How many hours back to look (default 24)"},
+            },
+            [],
+        ),
+        server_tool(
+            "get_latest_commits",
+            "Get the most recent commits in the repository. Use this when asked 'when was the last commit?' or 'show me recent commits'.",
+            {
+                "repo":  {"type": "string", "description": "Repository slug in owner/repo format"},
+                "count": {"type": "number", "description": "Number of recent commits to return (default 5)"},
             },
             [],
         ),

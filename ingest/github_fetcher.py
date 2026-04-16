@@ -368,6 +368,33 @@ class GithubFetcher:
         except Exception as e:
             return {"error": f"Could not fetch commit diff: {e}"}
 
+    def get_latest_commits(self, repo_slug: str, count: int = 5) -> Dict[str, Any]:
+        """
+        Get the N most recent commits in the repository.
+        Returns {'commits': [{'sha', 'message', 'author', 'date', 'url'}]} or 'error'.
+        """
+        repo = self._get_repo(repo_slug)
+        if not repo:
+            return {"error": f"Cannot access repository {repo_slug}."}
+        try:
+            raw_commits = repo.get_commits()
+            commits = []
+            for commit in self._safe_iterate(raw_commits, limit=count):
+                message = commit.commit.message or ""
+                commits.append({
+                    "sha": commit.sha[:7],
+                    "message": message.split("\n")[0],
+                    "author": (
+                        commit.author.login if commit.author
+                        else (commit.commit.author.name if commit.commit.author else "Unknown")
+                    ),
+                    "date": commit.commit.author.date.isoformat() if commit.commit.author else "",
+                    "url": commit.html_url,
+                })
+            return {"commits": commits}
+        except Exception as e:
+            return {"error": f"Could not fetch recent commits: {e}"}
+
     # ─────────────────────────────────────────────────────────────────
     # Feature 3: Standup Mode — recent activity
     # ─────────────────────────────────────────────────────────────────
