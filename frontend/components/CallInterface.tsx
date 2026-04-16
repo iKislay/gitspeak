@@ -430,6 +430,19 @@ export default function CallInterface() {
   const isCallBusy = callStatus === "connecting" || callStatus === "ending";
   const canCall = backendOk && repos.length > 0 && !!VAPI_KEY && !isLoading;
 
+  // Human-readable reason why the button is disabled (helps local debugging)
+  const disabledReason = isCallActive
+    ? null
+    : !VAPI_KEY
+    ? "NEXT_PUBLIC_VAPI_PUBLIC_KEY not set in .env.local"
+    : backendOk === null
+    ? "Waiting for backend health check…"
+    : backendOk === false
+    ? "Cannot reach backend — check NEXT_PUBLIC_BACKEND_URL and restart backend"
+    : repos.length === 0
+    ? "No repos indexed — POST to /ingest first"
+    : null;
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-screen bg-[#050505] overflow-hidden">
@@ -572,7 +585,15 @@ export default function CallInterface() {
       </main>
 
       {/* ── Bottom controls ────────────────────────────────────────────────── */}
-      <footer className="flex items-center justify-center gap-4 px-5 py-5 border-t border-[#1f1f1f] bg-[#050505]/80 backdrop-blur-sm flex-shrink-0">
+      <footer className="flex flex-col items-center gap-2 px-5 py-4 border-t border-[#1f1f1f] bg-[#050505]/80 backdrop-blur-sm flex-shrink-0">
+        {/* Disabled reason — shown clearly so it's never a mystery */}
+        {disabledReason && (
+          <p className="text-[11px] text-yellow-500/70 flex items-center gap-1.5 animate-fade-in">
+            <AlertCircle className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+            {disabledReason}
+          </p>
+        )}
+        <div className="flex items-center gap-4">
         {/* Mute */}
         <button
           onClick={handleToggleMute}
@@ -631,6 +652,7 @@ export default function CallInterface() {
           <Activity className="w-3.5 h-3.5" strokeWidth={2} />
           <span>{transcript.length} msgs</span>
         </div>
+        </div>{/* end button row */}
       </footer>
     </div>
   );
