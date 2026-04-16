@@ -18,6 +18,8 @@ import {
   AlertCircle,
   RefreshCw,
   Loader2,
+  SendHorizontal,
+  MessageSquare,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -168,15 +170,34 @@ function AIAvatar({
 
 // ─── Transcript Panel ─────────────────────────────────────────────────────────
 
-function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
+function TranscriptPanel({
+  entries,
+  isCallActive,
+  onSendText,
+}: {
+  entries: TranscriptEntry[];
+  isCallActive: boolean;
+  onSendText: (text: string) => void;
+}) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [inputText, setInputText] = useState("");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entries]);
 
+  const handleSend = () => {
+    const trimmed = inputText.trim();
+    if (!trimmed || !isCallActive) return;
+    onSendText(trimmed);
+    setInputText("");
+    inputRef.current?.focus();
+  };
+
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f1f1f]">
         <Activity className="w-3.5 h-3.5 text-emerald-400" strokeWidth={2} />
         <span className="text-xs text-gray-400 uppercase tracking-widest font-medium">
@@ -189,14 +210,15 @@ function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {entries.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
             <div className="w-10 h-10 rounded-full bg-[#1a1a1a] flex items-center justify-center">
-              <Mic className="w-4 h-4 text-gray-600" strokeWidth={1.5} />
+              <MessageSquare className="w-4 h-4 text-gray-600" strokeWidth={1.5} />
             </div>
             <p className="text-xs text-gray-600 leading-relaxed max-w-[180px]">
-              Start a call and your conversation will appear here in real time.
+              Start a call, then speak or type below.
             </p>
           </div>
         ) : (
@@ -225,6 +247,40 @@ function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
           ))
         )}
         <div ref={bottomRef} />
+      </div>
+
+      {/* Text input */}
+      <div className="px-3 py-3 border-t border-[#1f1f1f]">
+        <div className="flex gap-2 items-center">
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            disabled={!isCallActive}
+            placeholder={isCallActive ? "Type a message… (Enter to send)" : "Start a call to type"}
+            className="flex-1 min-w-0 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-emerald-500/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!isCallActive || !inputText.trim()}
+            title="Send message"
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <SendHorizontal className="w-3.5 h-3.5" strokeWidth={2} />
+          </button>
+        </div>
+        {!isCallActive && (
+          <p className="text-[10px] text-gray-700 mt-1.5 text-center">
+            mic not working? start a call and use text mode
+          </p>
+        )}
       </div>
     </div>
   );
@@ -418,6 +474,24 @@ export default function CallInterface() {
     setIsMuted(next);
   };
 
+  // Inject a text message into the live Vapi call — Vapi treats it as user speech
+  const handleSendText = useCallback(
+    (text: string) => {
+      if (!vapiRef.current || callStatus !== "active") return;
+      // Show in transcript immediately (Vapi won't echo it back as a transcript event)
+      setTranscript((prev) => [
+        ...prev,
+        { id: ++entryIdRef.current, role: "user", text },
+      ]);
+      // Send to Vapi — the LLM will process and respond as if the user spoke it
+      vapiRef.current.send({
+        type: "add-message",
+        message: { role: "user", content: text },
+      });
+    },
+    [callStatus]
+  );
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
       .toString()
@@ -578,9 +652,13 @@ export default function CallInterface() {
           )}
         </div>
 
-        {/* Right: transcript panel */}
+        {/* Right: transcript + text input panel */}
         <aside className="hidden lg:flex flex-col w-80 border-l border-[#1f1f1f] bg-[#050505]">
-          <TranscriptPanel entries={transcript} />
+          <TranscriptPanel
+            entries={transcript}
+            isCallActive={isCallActive}
+            onSendText={handleSendText}
+          />
         </aside>
       </main>
 
