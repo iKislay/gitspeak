@@ -15,11 +15,14 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "codebase_oracle")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") # e.g., https://api.ollama.com/v1
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
-OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+
+# Gemini Configuration (for embeddings)
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GEMINI_EMBED_MODEL = "models/gemini-embedding-001"
 
 # Fallbacks for specific logic
 LLM_MODEL = OLLAMA_MODEL
-EMBEDDING_MODEL = OLLAMA_EMBED_MODEL
+EMBEDDING_MODEL = GEMINI_EMBED_MODEL
 
 # VAPI Configuration
 VAPI_SECRET = os.getenv("VAPI_SECRET")

@@ -1,47 +1,52 @@
 import logging
 from typing import List, Dict, Any
-from openai import OpenAI
+import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-from config import OLLAMA_API_KEY, OLLAMA_BASE_URL, QDRANT_URL, QDRANT_API_KEY, COLLECTION_NAME, OLLAMA_EMBED_MODEL
+from config import GOOGLE_API_KEY, GEMINI_EMBED_MODEL, QDRANT_URL, QDRANT_API_KEY, COLLECTION_NAME
 
 logger = logging.getLogger(__name__)
 
 class Retriever:
     """
-    Handles query embedding via Ollama and semantic retrieval from Qdrant.
+    Handles query embedding via Gemini and semantic retrieval from Qdrant.
     """
     def __init__(self):
-        self.client = OpenAI(
-            api_key=OLLAMA_API_KEY,
-            base_url=OLLAMA_BASE_URL
-        )
+        genai.configure(api_key=GOOGLE_API_KEY)
         self.qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
     def search(self, query: str, repo: str, top_k: int = 6) -> List[Dict[str, Any]]:
         """
         Embed the query and search Qdrant for matching chunks filtered by repo.
         """
-        logger.info(f"Retrieving context for query: '{query}' in repo: {repo}")
+        # Normalize repo name (strip whitespace)
+        repo = repo.strip()
+        logger.info(f"Retrieving context for query: '{query}' in repo: '{repo}'")
         
         try:
-            # Embed query
-            response = self.client.embeddings.create(
-                input=[query],
-                model=OLLAMA_EMBED_MODEL
+            # Embed query using Gemini
+            response = genai.embed_content(
+                model=GEMINI_EMBED_MODEL,
+                content=query,
+                task_type="retrieval_query"
             )
-            query_vector = response.data[0].embedding
+            query_vector = response['embedding']
 
             # Search Qdrant
             hits = self.qdrant_client.search(
                 collection_name=COLLECTION_NAME,
                 query_vector=query_vector,
                 query_filter=models.Filter(
-                    must=[
+                    should=[ # Changed must to should with a fallback or just be more lenient
                         models.FieldCondition(
                             key="repo",
                             match=models.MatchValue(value=repo)
+                        ),
+                        # Fallback for case sensitivity or minor variations
+                        models.FieldCondition(
+                            key="repo",
+                            match=models.MatchText(text=repo)
                         )
                     ]
                 ),
@@ -84,7 +89,7 @@ class Retriever:
                 points, offset = response
                 
                 for point in points:
-                    if "repo" in point.payload:
+                    if point.payload and "repo" in point.payload:
                         repos.add(point.payload["repo"])
                         
                 if offset is None:

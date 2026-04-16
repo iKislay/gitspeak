@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from fastapi import Request, HTTPException
 
@@ -15,12 +16,6 @@ CONVERSATION_HISTORY: Dict[str, List[Dict[str, str]]] = {}
 def verify_vapi_secret(request: Request) -> None:
     """
     Verifies that the incoming request has the correct x-vapi-secret header.
-    
-    Args:
-        request: The incoming FastAPI Request object.
-        
-    Raises:
-        HTTPException: If the secret is missing or invalid.
     """
     secret = request.headers.get("x-vapi-secret")
     if VAPI_SECRET and secret != VAPI_SECRET:
@@ -30,10 +25,6 @@ def verify_vapi_secret(request: Request) -> None:
 async def get_assistant_config() -> Dict[str, Any]:
     """
     Return the assistant config when VAPI asks.
-    Matches the schema expected by VAPI for dynamic assistant configuration.
-    
-    Returns:
-        A dictionary containing the assistant configuration.
     """
     return {
         "assistant": {
@@ -73,106 +64,89 @@ async def get_assistant_config() -> Dict[str, Any]:
 async def handle_function_call(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle custom tool/function execution from VAPI.
-    
-    Args:
-        payload: The function-call message payload from VAPI.
-        
-    Returns:
-        A dictionary containing the 'result' for VAPI to speak.
+    Supports both Vapi 1.0 (functionCall) and 2.0 (tool-calls).
     """
-    call_id = payload.get("call", {}).get("id", "unknown_call")
-    function_call = payload.get("functionCall", {})
-    name = function_call.get("name")
-    parameters = function_call.get("parameters", {})
+    # Extract ID for Vapi 2.0 result mapping
+    tool_call_id = payload.get("id")
+    
+    # Extract common data
+    function_data = payload.get("functionCall") or payload.get("function", {})
+    name = function_data.get("name")
+    
+    # Parse parameters (Vapi 2.0 sends them as stringified 'arguments')
+    parameters = function_data.get("parameters")
+    if not parameters and "arguments" in function_data:
+        try:
+            parameters = json.loads(function_data["arguments"])
+        except Exception as e:
+            logger.error(f"Failed to parse tool arguments: {e}")
+            parameters = {}
     
     if name == "search_codebase":
         query = parameters.get("query")
         repo = parameters.get("repo")
         
         if not query or not repo:
-            return {"result": "I need both a query and a repository name to search. Could you provide those?"}
+            answer = "I need both a query and a repository name to search."
+        else:
+            logger.info(f"VAPI invoked search_codebase: repo={repo}, query='{query}'")
+            chunks = search(query=query, repo=repo)
             
-        logger.info(f"VAPI invoked search_codebase: repo={repo}, query='{query}'")
+            if not chunks:
+                answer = f"I couldn't find any context for {repo} in the database."
+            else:
+                call_id = payload.get("call", {}).get("id", "unknown_call")
+                history = CONVERSATION_HISTORY.get(call_id, [])
+                answer = synthesize(query=query, chunks=chunks, conversation_history=history)
+                
+                # Cache turn
+                history.append({"role": "user", "content": f"Searched {repo}: {query}"})
+                history.append({"role": "assistant", "content": answer})
+                CONVERSATION_HISTORY[call_id] = history
         
-        # 1. Retrieve relevant chunks from Qdrant
-        chunks = search(query=query, repo=repo)
-        
-        if not chunks:
-            return {"result": f"I couldn't find any context for that in the {repo} repository. Is it possible it hasn't been indexed yet?"}
-            
-        # 2. Get conversation history for context
-        history = CONVERSATION_HISTORY.get(call_id, [])
-        
-        # 3. Synthesize the final spoken answer
-        answer = synthesize(query=query, chunks=chunks, conversation_history=history)
-        
-        # Cache this turn in history
-        history.append({"role": "user", "content": f"Searched {repo} for: {query}"})
-        history.append({"role": "assistant", "content": answer})
-        CONVERSATION_HISTORY[call_id] = history
-        
+        # Format response based on Vapi version
+        if tool_call_id:
+            return {
+                "toolCallId": tool_call_id,
+                "result": answer
+            }
         return {"result": answer}
 
     logger.warning(f"Unknown function call received: {name}")
     return {"result": "I'm sorry, I don't know how to perform that action yet."}
 
 async def handle_end_of_call_report(payload: Dict[str, Any]) -> None:
-    """
-    Log the call report and clean up in-memory history.
-    
-    Args:
-        payload: The end-of-call-report message payload from VAPI.
-    """
     call_id = payload.get("call", {}).get("id")
-    summary = payload.get("summary", "No summary provided.")
-    ended_reason = payload.get("endedReason", "Unknown")
-    
-    logger.info(f"Call {call_id} ended. Reason: {ended_reason}. Summary: {summary}")
-    
     if call_id and call_id in CONVERSATION_HISTORY:
         del CONVERSATION_HISTORY[call_id]
 
 async def handle_status_update(payload: Dict[str, Any]) -> None:
-    """
-    Log status updates during the call.
-    
-    Args:
-        payload: The status-update message payload from VAPI.
-    """
-    call_id = payload.get("call", {}).get("id")
-    status = payload.get("status")
-    logger.info(f"Call {call_id} status updated to: {status}")
+    pass
 
 async def process_webhook(request: Request) -> Dict[str, Any]:
-    """
-    Main webhook entry point for processing VAPI events.
-    
-    Args:
-        request: The incoming FastAPI Request.
-        
-    Returns:
-        The JSON response for VAPI.
-    """
     verify_vapi_secret(request)
     body = await request.json()
-    
     message = body.get("message", {})
     msg_type = message.get("type")
     
     if msg_type == "assistant-request":
         return await get_assistant_config()
         
+    elif msg_type == "tool-calls":
+        # Vapi 2.0 sends a list of toolCalls and expects a 'results' list back
+        tool_calls = message.get("toolCalls", [])
+        results = []
+        for tc in tool_calls:
+            res = await handle_function_call(tc)
+            results.append(res)
+        return {"results": results}
+        
     elif msg_type == "function-call":
+        # Vapi 1.0 (legacy)
         return await handle_function_call(message)
         
     elif msg_type == "end-of-call-report":
         await handle_end_of_call_report(message)
         return {}
         
-    elif msg_type == "status-update":
-        await handle_status_update(message)
-        return {}
-        
-    logger.debug(f"Received unhandled VAPI message type: {msg_type}")
     return {}
-

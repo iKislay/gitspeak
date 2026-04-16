@@ -156,6 +156,8 @@ class GithubFetcher:
             raw_commits = repo.get_commits()
             commit_count = 0
             for commit in self._safe_iterate(raw_commits, limit=1000):
+                if commit_count >= 500:
+                    break
                 content = commit.commit.message
                 title = content.split('\n')[0] if content else "No Message"
                 

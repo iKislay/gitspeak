@@ -33,8 +33,14 @@ async def health_check():
 @app.post("/webhook")
 async def vapi_webhook(request: Request):
     """Event handler for all VAPI webhooks."""
-    response = await process_webhook(request)
-    return response
+    try:
+        body = await request.json()
+        logger.info(f"Received VAPI webhook: {body.get('message', {}).get('type')}")
+        response = await process_webhook(request)
+        return response
+    except Exception as e:
+        logger.error(f"Webhook processing failed: {e}", exc_info=True)
+        return {"error": str(e)}
 
 @app.post("/ingest")
 async def ingest_repo(req: IngestRequest, background_tasks: BackgroundTasks):

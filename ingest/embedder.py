@@ -1,24 +1,20 @@
 import uuid
 import logging
 from typing import List, Dict, Any
-from openai import OpenAI
+import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-from config import OLLAMA_API_KEY, OLLAMA_BASE_URL, QDRANT_URL, QDRANT_API_KEY, COLLECTION_NAME, OLLAMA_EMBED_MODEL
+from config import GOOGLE_API_KEY, GEMINI_EMBED_MODEL, QDRANT_URL, QDRANT_API_KEY, COLLECTION_NAME
 
 logger = logging.getLogger(__name__)
 
 class Embedder:
     """
-    Handles generating embeddings via Ollama Cloud (OpenAI-compatible) and upserting into Qdrant.
+    Handles generating embeddings via Gemini and upserting into Qdrant.
     """
     def __init__(self):
-        # We use the OpenAI client with the Ollama endpoint
-        self.client = OpenAI(
-            api_key=OLLAMA_API_KEY,
-            base_url=OLLAMA_BASE_URL
-        )
+        genai.configure(api_key=GOOGLE_API_KEY)
         self.qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         
         # Ensure collection exists
@@ -28,11 +24,8 @@ class Embedder:
         try:
             # Check if collection exists
             if not self.qdrant_client.collection_exists(COLLECTION_NAME):
-                # Note: Vector size depends on the model.
-                # 'nomic-embed-text' typically has 768 dimensions.
-                # If using something else, this might need dynamic configuration.
-                # Assuming standard Nomics 768 for Ollama-based embeddings.
-                vector_size = 768 if "nomic" in OLLAMA_EMBED_MODEL.lower() else 1536
+                # gemini-embedding-001 has 3072 dimensions
+                vector_size = 3072
                 
                 self.qdrant_client.create_collection(
                     collection_name=COLLECTION_NAME,
@@ -49,19 +42,20 @@ class Embedder:
 
     def embed_and_upsert(self, chunks: List[Dict[str, Any]], batch_size: int = 100):
         total_chunks = len(chunks)
-        logger.info(f"Starting embed and upsert for {total_chunks} chunks using {OLLAMA_EMBED_MODEL}...")
+        logger.info(f"Starting embed and upsert for {total_chunks} chunks using {GEMINI_EMBED_MODEL}...")
 
         for i in range(0, total_chunks, batch_size):
             batch = chunks[i:i + batch_size]
             texts = [chunk["text"] for chunk in batch]
             
             try:
-                # Embed batch
-                response = self.client.embeddings.create(
-                    input=texts,
-                    model=OLLAMA_EMBED_MODEL
+                # Embed batch using Gemini
+                response = genai.embed_content(
+                    model=GEMINI_EMBED_MODEL,
+                    content=texts,
+                    task_type="retrieval_document"
                 )
-                embeddings = [data.embedding for data in response.data]
+                embeddings = response['embedding']
                 
                 # Prepare Qdrant points
                 points = []

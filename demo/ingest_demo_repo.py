@@ -14,7 +14,7 @@ def main():
     logger = logging.getLogger("demo_ingest")
     
     # Hardcoded repo as requested for the demo script
-    repo = "facebook/react"
+    repo = "octocat/Spoon-Knife"
     logger.info(f"Starting ingestion pipeline for demo repo: {repo}")
 
     try:
