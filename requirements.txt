@@ -7,4 +7,4 @@ httpx
 python-dotenv
 tiktoken
 pydantic
-google-generativeai
+google-genai

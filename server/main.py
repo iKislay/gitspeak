@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from server.vapi_handler import process_webhook
 from server.retriever import list_indexed_repos
+import server.state as state
 
 from ingest.github_fetcher import GithubFetcher
 from ingest.chunker import Chunker
@@ -20,6 +21,23 @@ app = FastAPI(title="Voice Codebase Oracle")
 
 class IngestRequest(BaseModel):
     repo: str
+
+class SetRepoRequest(BaseModel):
+    repo: str
+
+@app.post("/set-repo")
+async def set_active_repo(req: SetRepoRequest):
+    """Set the active repo for all upcoming voice calls."""
+    indexed = list_indexed_repos()
+    if req.repo not in indexed:
+        return {
+            "status": "warning",
+            "message": f"'{req.repo}' is not indexed yet. Run /ingest first.",
+            "active_repo": state.active_repo
+        }
+    state.active_repo = req.repo
+    logger.info(f"Active repo set to: {req.repo}")
+    return {"status": "ok", "active_repo": state.active_repo}
 
 @app.get("/health")
 async def health_check():

@@ -1,7 +1,8 @@
 import uuid
 import logging
 from typing import List, Dict, Any
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
@@ -14,9 +15,9 @@ class Embedder:
     Handles generating embeddings via Gemini and upserting into Qdrant.
     """
     def __init__(self):
-        genai.configure(api_key=GOOGLE_API_KEY)
+        self.genai_client = genai.Client(api_key=GOOGLE_API_KEY)
         self.qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-        
+
         # Ensure collection exists
         self._init_collection()
 
@@ -26,7 +27,7 @@ class Embedder:
             if not self.qdrant_client.collection_exists(COLLECTION_NAME):
                 # gemini-embedding-001 has 3072 dimensions
                 vector_size = 3072
-                
+
                 self.qdrant_client.create_collection(
                     collection_name=COLLECTION_NAME,
                     vectors_config=models.VectorParams(
@@ -37,6 +38,14 @@ class Embedder:
                 logger.info(f"Created Qdrant collection: {COLLECTION_NAME} with size {vector_size}")
             else:
                 logger.info(f"Qdrant collection {COLLECTION_NAME} already exists.")
+
+            # Ensure keyword index exists on 'repo' field (required for filtered search)
+            self.qdrant_client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="repo",
+                field_schema=models.PayloadSchemaType.KEYWORD
+            )
+            logger.info("Ensured keyword index on 'repo' field.")
         except Exception as e:
             logger.error(f"Failed to initialize Qdrant collection: {e}")
 
@@ -50,12 +59,12 @@ class Embedder:
             
             try:
                 # Embed batch using Gemini
-                response = genai.embed_content(
+                response = self.genai_client.models.embed_content(
                     model=GEMINI_EMBED_MODEL,
-                    content=texts,
-                    task_type="retrieval_document"
+                    contents=texts,
+                    config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
                 )
-                embeddings = response['embedding']
+                embeddings = [e.values for e in response.embeddings]
                 
                 # Prepare Qdrant points
                 points = []
