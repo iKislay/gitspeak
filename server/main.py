@@ -1,9 +1,10 @@
 import logging
 from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
-from server.vapi_handler import process_webhook
+from server.vapi_handler import process_webhook, build_vapi_inline_config
 from server.retriever import list_indexed_repos, repo_stats
 from server.standup import generate_standup_summary
 import server.state as state
@@ -25,6 +26,16 @@ app = FastAPI(
         "using natural speech."
     ),
     version="2.0.0",
+)
+
+# Allow the Vercel frontend to reach this backend.
+# Restrict allow_origins to your Vercel domain in production for tighter security.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -144,6 +155,16 @@ async def standup_report(req: StandupRequest):
             "open_prs_updated": len(activity.get("open_prs_updated", [])),
         },
     }
+
+
+@app.get("/vapi-config")
+async def vapi_config():
+    """
+    Return a complete Vapi inline assistant config for the web frontend.
+    The frontend passes this directly to vapi.start() so no Vapi dashboard
+    assistant setup is required — just a public key.
+    """
+    return await build_vapi_inline_config()
 
 
 @app.post("/webhook")

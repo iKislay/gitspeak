@@ -3,7 +3,7 @@ import json
 from typing import Dict, Any, List, Optional
 from fastapi import Request, HTTPException
 
-from config import VAPI_SECRET
+from config import VAPI_SECRET, BACKEND_URL
 from server.retriever import search, search_across_repos, list_indexed_repos
 from server.synthesizer import synthesize
 from server.standup import generate_standup_summary
@@ -300,3 +300,140 @@ async def process_webhook(request: Request) -> Dict[str, Any]:
         return {}
 
     return {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inline Vapi assistant config (served to the web frontend)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def build_vapi_inline_config() -> Dict[str, Any]:
+    """
+    Build a complete Vapi inline assistant configuration that can be passed
+    directly to vapi.start() in the browser SDK. This eliminates the need
+    to pre-configure an assistant in the Vapi dashboard.
+
+    The BACKEND_URL env var must point to the publicly accessible backend
+    (e.g. the Railway URL) so that Vapi can reach the /webhook endpoint.
+    """
+    webhook_url = BACKEND_URL.rstrip("/") + "/webhook"
+
+    # ── System prompt & greeting ────────────────────────────────────────────
+    if state.active_repo:
+        first_message = (
+            f"Hey! I'm SonarCode, your AI dev assistant. "
+            f"I'm ready to answer questions about {state.active_repo}. "
+            "You can ask me to search the codebase, read a file, get a standup briefing, and more. What do you want to know?"
+        )
+        system_prompt = (
+            f"You are SonarCode, a voice assistant for the GitHub repository '{state.active_repo}'. "
+            f"ALWAYS use '{state.active_repo}' as the repo argument in every tool call unless the user explicitly names a different one. "
+            "Your responses are spoken aloud — NEVER use markdown, bullet points, or code blocks. "
+            "Keep responses under 150 words. Sound like a friendly senior developer on a video call. "
+            "When the tool returns an answer, relay it exactly — do not re-summarise or add filler phrases. "
+            "Available tools: search_codebase, search_all_repos, read_file, list_directory, get_recent_diff, get_standup_report."
+        )
+    else:
+        indexed = list_indexed_repos()
+        repo_list = ", ".join(indexed) if indexed else "none yet"
+        first_message = (
+            f"Hey! I'm SonarCode. I have these repos indexed: {repo_list}. "
+            "Which one do you want to explore?"
+        )
+        system_prompt = (
+            "You are SonarCode, a voice codebase assistant. "
+            f"Indexed repos: {repo_list}. "
+            "Ask the user which repo to explore, then use the appropriate tool. "
+            "Responses are spoken aloud — no markdown."
+        )
+
+    # ── Tool definitions ─────────────────────────────────────────────────────
+    def server_tool(name: str, description: str, properties: Dict, required: List[str]) -> Dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+            "server": {"url": webhook_url},
+        }
+
+    tools = [
+        server_tool(
+            "search_codebase",
+            "Semantic search over PRs, commits, README, and source code files in a repository.",
+            {
+                "query": {"type": "string", "description": "The question or search query about the codebase"},
+                "repo":  {"type": "string", "description": "Repository slug in owner/repo format"},
+            },
+            ["query"],
+        ),
+        server_tool(
+            "search_all_repos",
+            "Search across all indexed repositories when the user does not specify a particular repo.",
+            {
+                "query": {"type": "string", "description": "The question or search query"},
+            },
+            ["query"],
+        ),
+        server_tool(
+            "read_file",
+            "Read the full content of a specific file in the repository.",
+            {
+                "repo": {"type": "string", "description": "Repository slug in owner/repo format"},
+                "path": {"type": "string", "description": "File path relative to the repo root, e.g. src/main.py"},
+            },
+            ["path"],
+        ),
+        server_tool(
+            "list_directory",
+            "List files and folders inside a directory of the repository.",
+            {
+                "repo": {"type": "string", "description": "Repository slug in owner/repo format"},
+                "path": {"type": "string", "description": "Directory path, or empty string for the root"},
+            },
+            [],
+        ),
+        server_tool(
+            "get_recent_diff",
+            "Get the file changes introduced by a specific commit SHA.",
+            {
+                "repo": {"type": "string", "description": "Repository slug in owner/repo format"},
+                "sha":  {"type": "string", "description": "Full or short commit SHA"},
+            },
+            ["sha"],
+        ),
+        server_tool(
+            "get_standup_report",
+            "Summarise recent merged PRs and commits for a daily standup briefing.",
+            {
+                "repo":  {"type": "string", "description": "Repository slug in owner/repo format"},
+                "hours": {"type": "number", "description": "How many hours back to look (default 24)"},
+            },
+            [],
+        ),
+    ]
+
+    return {
+        "name": "SonarCode",
+        "firstMessage": first_message,
+        "model": {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "systemPrompt": system_prompt,
+            "tools": tools,
+        },
+        "voice": {
+            "provider": "openai",
+            "voiceId": "shimmer",
+        },
+        "transcriber": {
+            "provider": "deepgram",
+            "model": "nova-2",
+            "language": "en",
+        },
+    }

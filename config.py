@@ -27,6 +27,9 @@ EMBEDDING_MODEL = GEMINI_EMBED_MODEL
 # VAPI Configuration
 VAPI_SECRET = os.getenv("VAPI_SECRET")
 
+# Backend public URL (used to self-reference in Vapi tool config)
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
 # Deep Code Ingestion Configuration
 INGEST_SOURCE_FILES = os.getenv("INGEST_SOURCE_FILES", "true").lower() == "true"
 MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_BYTES", "51200"))  # 50 KB default
