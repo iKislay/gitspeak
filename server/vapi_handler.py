@@ -386,6 +386,11 @@ async def build_vapi_inline_config() -> Dict[str, Any]:
 
     # ── Tool definitions ─────────────────────────────────────────────────────
     def server_tool(name: str, description: str, properties: Dict, required: List[str]) -> Dict:
+        server_config: Dict = {"url": webhook_url}
+        if VAPI_SECRET:
+            # Vapi sends this value as the x-vapi-secret header so the backend
+            # can authenticate the request via verify_vapi_secret().
+            server_config["secret"] = VAPI_SECRET
         return {
             "type": "function",
             "function": {
@@ -397,7 +402,7 @@ async def build_vapi_inline_config() -> Dict[str, Any]:
                     "required": required,
                 },
             },
-            "server": {"url": webhook_url},
+            "server": server_config,
         }
 
     tools = [
