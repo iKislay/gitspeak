@@ -36,6 +36,10 @@ Keep your response under 120 words."""
             source_label = "README"
         elif item_type == "file_tree":
             source_label = "File Tree"
+        elif item_type == "source_file":
+            file_path = chunk.get("path", item_id)
+            language = chunk.get("language", "")
+            source_label = f"File {file_path}" + (f" ({language})" if language else "")
         else:
             source_label = f"{item_type} {item_id}"
 

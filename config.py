@@ -26,3 +26,18 @@ EMBEDDING_MODEL = GEMINI_EMBED_MODEL
 
 # VAPI Configuration
 VAPI_SECRET = os.getenv("VAPI_SECRET")
+
+# Deep Code Ingestion Configuration
+INGEST_SOURCE_FILES = os.getenv("INGEST_SOURCE_FILES", "true").lower() == "true"
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_BYTES", "51200"))  # 50 KB default
+MAX_SOURCE_FILES = int(os.getenv("MAX_SOURCE_FILES", "200"))  # cap for large repos
+INGESTED_EXTENSIONS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rs",
+    ".rb", ".cs", ".cpp", ".c", ".h", ".swift", ".kt",
+    ".md", ".yaml", ".yml", ".json", ".toml", ".sh",
+}
+SKIP_PATH_PATTERNS = {
+    "node_modules", "__pycache__", ".git", "dist", "build",
+    "vendor", ".venv", "venv", "env", ".mypy_cache", ".pytest_cache",
+    "coverage", ".next", "target", "out", ".tox",
+}
